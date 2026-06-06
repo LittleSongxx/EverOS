@@ -39,6 +39,13 @@ class _StubEmbedder(EmbeddingProvider):
         return [[0.0] * self.dim for _ in texts]
 
 
+_ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text)
+
+
 @pytest.fixture
 def cli_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     """Tmp memory root + clean singletons; CLI bootstraps the schema itself."""
@@ -120,16 +127,12 @@ def test_sync_with_path_outside_root_errors(
     other.write_text("# unrelated\n")
     result = CliRunner().invoke(cascade_mod.app, ["sync", str(other)])
     assert result.exit_code != 0
-    # Typer.BadParameter surfaces in stderr / mixed output. The rich
-    # error box wraps the message at terminal width and pads each line
-    # with ``│`` (U+2502 box-drawing); so ``not under`` and
-    # ``memory root`` end up separated by spaces *plus* box characters
-    # *plus* a newline. ``\s`` doesn't match ``│``, so widen to
-    # ``[^\w]+`` (anything that isn't an alnum / underscore) — that
-    # tolerates the rich frame without falsely matching real text
-    # between the two tokens.
+    # Typer.BadParameter surfaces in stderr / mixed output. The Rich
+    # error box may wrap the message, pad each line with box characters,
+    # and inject ANSI control codes on CI. Strip ANSI first, then allow
+    # non-word separators between the split message fragments.
     output = result.stdout + (result.stderr or "")
-    assert re.search(r"not under[^\w]+memory root", output), output
+    assert re.search(r"not under[^\w]+memory root", _strip_ansi(output)), output
 
 
 def test_sync_with_unmatched_path(
